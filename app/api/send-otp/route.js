@@ -8,7 +8,7 @@ const client = twilio(
 
 export async function POST(req) {
   try {
-    const { phone, action } = await req.json();
+    const { phone, action, code } = await req.json();
 
     // נקה את המספר
     const cleaned = String(phone).replace(/\D/g, "");
@@ -27,12 +27,11 @@ export async function POST(req) {
     }
 
     if (action === "verify") {
-      const { code } = await req.json();
       const result = await client.verify.v2
         .services(process.env.TWILIO_VERIFY_SID)
         .verificationChecks.create({
           to: formatted,
-          code: String(code),
+          code: String(code).replace(/\s/g, ""),
         });
       return NextResponse.json({ ok: result.status === "approved" });
     }

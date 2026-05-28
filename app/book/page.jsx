@@ -127,7 +127,11 @@ export default function BookPage() {
       const res = await fetch("/api/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: client.phone, action: "verify", code: otpInput }),
+        body: JSON.stringify({
+          phone: client.phone,
+          action: "verify",
+          code: String(otpInput).replace(/\s/g, ""),
+        }),
       });
       const data = await res.json();
       if (data.ok) {
