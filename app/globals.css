@@ -1,26 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --font-heebo: "Heebo";
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+* { box-sizing: border-box; }
+html { background: #f8fafc; }
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-heebo), Heebo, Arial, Helvetica, sans-serif;
+}
+button, input, textarea, select { font-family: inherit; }
+a { color: inherit; }
+
+.dbmBusinessCard { transition: transform .18s ease, box-shadow .18s ease; }
+.dbmBusinessCard:hover { transform: translateY(-4px); box-shadow: 0 26px 60px rgba(15,23,42,.13) !important; }
+
+@media (max-width: 760px) {
+  .dbmHeroGrid { grid-template-columns: 1fr !important; }
+  .dbmHeroCards { grid-template-columns: repeat(3, 1fr) !important; }
+  .dbmHeroCards > div { padding: 12px !important; }
+  .dbmStatsGrid { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 520px) {
+  .dbmHeroCards { display: none !important; }
 }
