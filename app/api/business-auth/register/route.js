@@ -26,18 +26,17 @@ export async function POST(req) {
     const slugBase = body.slug || body.name.toLowerCase().replace(/[^a-z0-9א-ת]+/gi, "-");
     const slug = `${slugBase}`.replace(/^-|-$/g, "") || `business-${Date.now()}`;
 
-    const { data: business, error: bizErr } = await supabase.from("businesses").insert({
-      name: body.name,
-      slug,
-      owner_name: body.owner_name || "",
-      phone: body.phone,
-      address: body.address || "",
-      category: body.category || "",
-      logo_url: body.logo_url || "",
-      status: "active",
-    }).select().single();
-    if (bizErr) return NextResponse.json({ error: bizErr.message }, { status: 400 });
-
+    const { data: business, error: bizErr } = await supabase
+  .from("businesses")
+  .insert({
+    name: body.name,
+    slug,
+    phone: body.phone,
+    address: body.address || "",
+    status: "active",
+  })
+  .select()
+  .single();
     const sessionToken = token();
     const { error: userErr } = await supabase.from("business_users").insert({
       business_id: business.id,
