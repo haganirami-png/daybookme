@@ -4,191 +4,375 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
-const PLANS = [
-  { id: "starter", name: "Starter", price: 99, badge: "להתחלה", features: ["עד 100 תורים", "עמוד הזמנה", "ניהול בסיסי"] },
-  { id: "pro", name: "Pro", price: 199, badge: "מומלץ", features: ["תורים ללא הגבלה", "Realtime", "הגדרות מלאות"] },
-  { id: "premium", name: "Premium", price: 349, badge: "מתקדם", features: ["כמה צוותים", "אוטומציות", "תמיכה מועדפת"] },
-];
-const DAYS = ["א", "ב", "ג", "ד", "ה", "ו", "ש"];
-const TIMES = Array.from({ length: 29 }, (_, i) => {
-  const mins = 8 * 60 + i * 30;
-  return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
-});
+const CATEGORIES = ["הכול", "יופי וטיפוח", "מספרות", "ציפורניים", "קוסמטיקה", "בריאות", "כושר", "רכב", "שיעורים", "אחר"];
 
 const S = {
-  page: { fontFamily: "Heebo, Arial, sans-serif", direction: "rtl", minHeight: "100vh", background: "#f6f7fb", color: "#111827" },
-  wrap: { maxWidth: 1180, margin: "0 auto", padding: 20 },
-  card: { background: "white", border: "1px solid #e5e7eb", borderRadius: 18, padding: 18, boxShadow: "0 10px 30px rgba(15,23,42,.05)" },
-  input: { width: "100%", padding: "12px 14px", border: "1px solid #d1d5db", borderRadius: 12, fontSize: 14, outline: "none", boxSizing: "border-box" },
-  btn: { border: 0, borderRadius: 12, padding: "11px 16px", fontWeight: 800, cursor: "pointer", fontFamily: "inherit" },
+  page: {
+    fontFamily: "Heebo, Arial, sans-serif",
+    direction: "rtl",
+    minHeight: "100vh",
+    background: "#f6f7fb",
+    color: "#111827",
+  },
+  wrap: {
+    maxWidth: 1180,
+    margin: "0 auto",
+    padding: "18px 18px 90px",
+  },
+  hero: {
+    background: "linear-gradient(135deg,#111827,#4f46e5 55%,#7c3aed)",
+    color: "white",
+    borderRadius: 28,
+    padding: 24,
+    boxShadow: "0 18px 45px rgba(79,70,229,.22)",
+  },
+  input: {
+    width: "100%",
+    border: 0,
+    borderRadius: 18,
+    padding: "16px 18px",
+    fontSize: 16,
+    outline: "none",
+    boxSizing: "border-box",
+    fontFamily: "inherit",
+    boxShadow: "0 10px 30px rgba(0,0,0,.12)",
+  },
+  chip: {
+    border: "1px solid #e5e7eb",
+    background: "white",
+    borderRadius: 999,
+    padding: "10px 14px",
+    fontWeight: 900,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+  },
+  card: {
+    background: "white",
+    border: "1px solid #e5e7eb",
+    borderRadius: 22,
+    overflow: "hidden",
+    boxShadow: "0 10px 28px rgba(15,23,42,.06)",
+  },
+  btn: {
+    border: 0,
+    borderRadius: 14,
+    padding: "12px 15px",
+    fontWeight: 900,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
   primary: { background: "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "white" },
   ghost: { background: "#f3f4f6", color: "#374151" },
-  danger: { background: "#fee2e2", color: "#b91c1c" },
-  label: { fontSize: 12, fontWeight: 800, color: "#6b7280", marginBottom: 6, display: "block" },
 };
 
-function slugify(v) {
-  return (v || "business").toLowerCase().trim().replace(/[^a-z0-9א-ת]+/gi, "-").replace(/^-|-$/g, "") || `business-${Date.now()}`;
-}
-function isActiveSubscription(sub) {
+function isSubActive(sub) {
   if (!sub) return false;
   if (!["active", "trialing"].includes(sub.status)) return false;
   if (!sub.current_period_end) return true;
   return new Date(sub.current_period_end).getTime() > Date.now();
 }
-function safeTime(v) { return String(v || "").slice(0, 5); }
-function todayIso() { return new Date().toISOString().slice(0, 10); }
-function arr(v) { return Array.isArray(v) ? v.filter(Boolean) : []; }
-function obj(v) { return v && typeof v === "object" ? v : {}; }
-function getClientName(a) { return a?.client_name || a?.client?.name || "לקוח"; }
-function getClientPhone(a) { return a?.client_phone || a?.client?.phone || ""; }
 
+function safeText(v, fallback = "") {
+  return String(v || fallback);
+}
 
-export default function BusinessApp() {
-  const [authReady, setAuthReady] = useState(false);
-  const [business, setBusiness] = useState(null);
-  const [token, setToken] = useState(null);
-  const [mode, setMode] = useState("login");
-  const [login, setLogin] = useState({ phone: "", password: "" });
-  const [register, setRegister] = useState({ name: "", owner_name: "", phone: "", password: "", address: "", category: "יופי וטיפוח", logo_url: "" });
-  const [tab, setTab] = useState("dashboard");
-  const [toast, setToast] = useState("");
-  const [loading, setLoading] = useState(false);
+function businessImage(b) {
+  return b?.logo_url || "";
+}
 
-  const [appointments, setAppointments] = useState([]);
-  const [employees, setEmployees] = useState([]);
+export default function ClientMarketplaceHome() {
+  const [mounted, setMounted] = useState(false);
+  const [businesses, setBusinesses] = useState([]);
   const [services, setServices] = useState([]);
-  const [availability, setAvailability] = useState([]);
-  const [breaks, setBreaks] = useState([]);
-  const [daysOff, setDaysOff] = useState([]);
-  const [subscription, setSubscription] = useState(null);
-
-  const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "" });
-  const [newService, setNewService] = useState({ name: "", duration: 45, price: 100, emoji: "✨", employee_id: "" });
-  const [newDayOff, setNewDayOff] = useState({ date: todayIso(), reason: "" });
-  const [newBreak, setNewBreak] = useState({ day_of_week: 0, start_time: "13:00", end_time: "13:30", title: "הפסקה" });
-
-  const subActive = isActiveSubscription(subscription);
-  const bookingUrl = business ? `${typeof window !== "undefined" ? window.location.origin : ""}/book?business_id=${business.id}` : "";
-
-  const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("הכול");
+  const [favorites, setFavorites] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem("businessSession");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setBusiness(parsed.business);
-        setToken(parsed.token);
-      } catch {}
+    setMounted(true);
+    try {
+      setFavorites(JSON.parse(localStorage.getItem("clientFavorites") || "[]"));
+    } catch {
+      setFavorites([]);
     }
-    setAuthReady(true);
+    loadMarketplace();
   }, []);
 
-  useEffect(() => { if (business?.id) loadAll(business.id); }, [business?.id]);
-
-  useEffect(() => {
-    if (!business?.id) return;
-    const ch = supabase.channel(`biz-${business.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `business_id=eq.${business.id}` }, () => loadAppointments(business.id))
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [business?.id]);
-
-  async function apiAuth(action, payload) {
-    const res = await fetch(`/api/business-auth/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "שגיאה");
-    return data;
-  }
-
-  async function doLogin() {
+  async function loadMarketplace() {
     setLoading(true);
-    try {
-      const data = await apiAuth("login", login);
-      localStorage.setItem("businessSession", JSON.stringify(data));
-      setBusiness(data.business); setToken(data.token); notify("נכנסת בהצלחה");
-    } catch (e) { alert(e.message); } finally { setLoading(false); }
+    const [{ data: b }, { data: s }, { data: sub }] = await Promise.all([
+      supabase.from("businesses").select("*").order("created_at", { ascending: false }),
+      supabase.from("business_services").select("*").eq("is_active", true),
+      supabase.from("business_subscriptions").select("*").order("created_at", { ascending: false }),
+    ]);
+
+    setBusinesses(Array.isArray(b) ? b : []);
+    setServices(Array.isArray(s) ? s : []);
+    setSubscriptions(Array.isArray(sub) ? sub : []);
+    setLoading(false);
   }
-  async function doRegister() {
-    if (!register.name || !register.phone || register.password.length < 6) return alert("שם עסק, טלפון וסיסמה של לפחות 6 תווים");
-    setLoading(true);
-    try {
-      const payload = { ...register, slug: slugify(register.name) };
-      const data = await apiAuth("register", payload);
-      localStorage.setItem("businessSession", JSON.stringify(data));
-      setBusiness(data.business); setToken(data.token); notify("העסק נפתח בהצלחה");
-    } catch (e) { alert(e.message); } finally { setLoading(false); }
+
+  function latestSubForBusiness(id) {
+    return subscriptions.find(x => x?.business_id === id) || null;
   }
-  function logout() { localStorage.removeItem("businessSession"); setBusiness(null); setToken(null); }
 
-  async function loadAll(id) { await Promise.all([loadBusiness(id), loadAppointments(id), loadEmployees(id), loadServices(id), loadAvailability(id), loadSubscription(id), loadBreaks(id), loadDaysOff(id)]); }
-  async function loadBusiness(id) { const { data } = await supabase.from("businesses").select("*").eq("id", id).single(); if (data) setBusiness(data); }
-  async function loadAppointments(id) { const { data } = await supabase.from("appointments").select("*").eq("business_id", id).order("date", { ascending: true }).order("time", { ascending: true }); setAppointments(arr(data)); }
-  async function loadEmployees(id) { const { data } = await supabase.from("employees").select("*").eq("business_id", id).order("created_at"); setEmployees(arr(data)); }
-  async function loadServices(id) { const { data } = await supabase.from("business_services").select("*").eq("business_id", id).eq("is_active", true).order("created_at"); setServices(arr(data)); }
-  async function loadAvailability(id) { const { data } = await supabase.from("business_availability").select("*").eq("business_id", id).order("day_of_week"); setAvailability(arr(data)); }
-  async function loadBreaks(id) { const { data } = await supabase.from("business_breaks").select("*").eq("business_id", id).order("day_of_week"); setBreaks(arr(data)); }
-  async function loadDaysOff(id) { const { data } = await supabase.from("business_days_off").select("*").eq("business_id", id).order("date", { ascending: false }); setDaysOff(arr(data)); }
-  async function loadSubscription(id) { const { data } = await supabase.from("business_subscriptions").select("*").eq("business_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(); setSubscription(data || null); }
+  const visibleBusinesses = useMemo(() => {
+    const q = query.trim().toLowerCase();
 
-  async function updateBusiness(patch) { const { error } = await supabase.from("businesses").update(patch).eq("id", business.id); if (error) return alert(error.message); notify("נשמר"); loadBusiness(business.id); }
-  async function addEmployee() { if (!newEmployee.name) return; const { error } = await supabase.from("employees").insert({ business_id: business.id, ...newEmployee }); if (error) return alert(error.message); setNewEmployee({ name: "", role: "", phone: "" }); loadEmployees(business.id); notify("עובד נוסף"); }
-  async function removeEmployee(id) { await supabase.from("employees").update({ status: "inactive" }).eq("id", id); loadEmployees(business.id); }
-  async function addService() { if (!newService.name) return; const { error } = await supabase.from("business_services").insert({ business_id: business.id, ...newService, employee_id: newService.employee_id || null }); if (error) return alert(error.message); setNewService({ name: "", duration: 45, price: 100, emoji: "✨", employee_id: "" }); loadServices(business.id); notify("שירות נוסף"); }
-  async function removeService(id) { await supabase.from("business_services").update({ is_active: false }).eq("id", id); loadServices(business.id); }
-  async function updateAvailability(row) { await supabase.from("business_availability").upsert({ ...row, business_id: business.id }, { onConflict: "business_id,day_of_week" }); loadAvailability(business.id); notify("זמינות נשמרה"); }
-  async function addBreak() { await supabase.from("business_breaks").insert({ business_id: business.id, ...newBreak }); loadBreaks(business.id); notify("הפסקה נוספה"); }
-  async function addDayOff() { await supabase.from("business_days_off").insert({ business_id: business.id, ...newDayOff }); loadDaysOff(business.id); notify("יום חופש נוסף"); }
-  async function setApptStatus(id, status) { await supabase.from("appointments").update({ status }).eq("id", id); loadAppointments(business.id); }
-  async function startCheckout(planId) { setLoading(true); try { const res = await fetch("/api/payments/create-checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ businessId: business.id, planId }) }); const data = await res.json(); if (data.checkoutUrl) window.location.href = data.checkoutUrl; else loadSubscription(business.id); } finally { setLoading(false); } }
+    return businesses
+      .filter(b => b?.status !== "inactive")
+      .filter(b => isSubActive(latestSubForBusiness(b.id)))
+      .filter(b => category === "הכול" || safeText(b.category, "אחר") === category)
+      .filter(b => {
+        if (!q) return true;
+        const bizServices = services.filter(s => s.business_id === b.id).map(s => s.name).join(" ");
+        const text = [
+          b.name,
+          b.address,
+          b.category,
+          b.about,
+          bizServices,
+        ].join(" ").toLowerCase();
+        return text.includes(q);
+      });
+  }, [businesses, services, subscriptions, query, category]);
 
-  const stats = useMemo(() => ({ upcoming: arr(appointments).filter(a => ["pending", "upcoming", "confirmed"].includes(a?.status)).length, today: arr(appointments).filter(a => a?.date === todayIso()).length, cancelled: arr(appointments).filter(a => a?.status === "cancelled").length }), [appointments]);
+  const favoriteBusinesses = visibleBusinesses.filter(b => favorites.includes(b.id));
+  const newestBusinesses = [...visibleBusinesses].slice(0, 10);
+  const popularBusinesses = [...visibleBusinesses].sort((a, b) => {
+    const aCount = services.filter(s => s.business_id === a.id).length;
+    const bCount = services.filter(s => s.business_id === b.id).length;
+    return bCount - aCount;
+  }).slice(0, 10);
 
-  if (!authReady) return null;
-  if (!business) return <AuthScreen mode={mode} setMode={setMode} login={login} setLogin={setLogin} register={register} setRegister={setRegister} doLogin={doLogin} doRegister={doRegister} loading={loading} />;
+  function toggleFavorite(id) {
+    const next = favorites.includes(id) ? favorites.filter(x => x !== id) : [id, ...favorites];
+    setFavorites(next);
+    localStorage.setItem("clientFavorites", JSON.stringify(next));
+  }
 
-  const nav = [
-    ["dashboard", "📊 לוח עסק"], ["appointments", "📅 תורים"], ["settings", "⚙️ הגדרות עסק"], ["services", "💈 שירותים"], ["employees", "👥 עובדים"], ["availability", "🕒 זמינות"], ["billing", "💳 מנוי"]
-  ];
+  if (!mounted) return null;
 
-  return <div style={S.page}>
-    <div style={{ background: "linear-gradient(135deg,#111827,#4f46e5)", color: "white" }}><div style={{ ...S.wrap, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-      <div><div style={{ fontSize: 24, fontWeight: 900 }}>{business.name}</div><div style={{ opacity: .75, fontSize: 13 }}>{business.address || "לא הוגדרה כתובת"}</div></div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}><button style={{ ...S.btn, background: "rgba(255,255,255,.14)", color: "white" }} onClick={() => navigator.clipboard.writeText(bookingUrl).then(() => notify("הקישור הועתק"))}>🔗 העתק קישור לקוחות</button><button style={{ ...S.btn, background: "rgba(255,255,255,.14)", color: "white" }} onClick={logout}>יציאה</button></div>
-    </div></div>
-    <div style={{ ...S.wrap, display: "grid", gridTemplateColumns: "220px 1fr", gap: 16 }}>
-      <aside style={{ ...S.card, height: "fit-content", position: "sticky", top: 16 }}>
-        <div style={{ fontSize: 12, color: subActive ? "#059669" : "#dc2626", fontWeight: 900, marginBottom: 12 }}>{subActive ? "● מנוי פעיל" : "● מנוי לא פעיל"}</div>
-        {arr(nav).map(([id, label]) => <button key={id} onClick={() => setTab(id)} style={{ ...S.btn, width: "100%", textAlign: "right", marginBottom: 7, background: tab === id ? "#ede9fe" : "transparent", color: tab === id ? "#5b21b6" : "#374151" }}>{label}</button>)}
-      </aside>
-      <main>{!subActive && tab !== "billing" && <div style={{ ...S.card, borderColor: "#fecaca", background: "#fff7f7", marginBottom: 16 }}><b>המנוי לא פעיל.</b> עמוד הלקוחות של העסק נעול ולא יאפשר קביעת תורים עד הפעלת מנוי. <button style={{ ...S.btn, ...S.primary, marginRight: 12 }} onClick={() => setTab("billing")}>הפעל מנוי</button></div>}
-        {tab === "dashboard" && <Dashboard stats={stats} appointments={appointments} bookingUrl={bookingUrl} />}
-        {tab === "appointments" && <Appointments appointments={appointments} setApptStatus={setApptStatus} />}
-        {tab === "settings" && <Settings business={business} updateBusiness={updateBusiness} />}
-        {tab === "services" && <Services services={services} employees={employees} newService={newService} setNewService={setNewService} addService={addService} removeService={removeService} />}
-        {tab === "employees" && <Employees employees={employees} newEmployee={newEmployee} setNewEmployee={setNewEmployee} addEmployee={addEmployee} removeEmployee={removeEmployee} />}
-        {tab === "availability" && <Availability availability={availability} updateAvailability={updateAvailability} breaks={breaks} addBreak={addBreak} newBreak={newBreak} setNewBreak={setNewBreak} daysOff={daysOff} addDayOff={addDayOff} newDayOff={newDayOff} setNewDayOff={setNewDayOff} />}
-        {tab === "billing" && <Billing subscription={subscription} startCheckout={startCheckout} loading={loading} />}
-      </main>
+  return (
+    <div style={S.page}>
+      <div style={S.wrap}>
+        <header style={S.hero}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 22 }}>
+            <div>
+              <div style={{ fontSize: 13, opacity: .82, fontWeight: 800 }}>DayBookMe</div>
+              <h1 style={{ margin: "6px 0 6px", fontSize: 34, lineHeight: 1.05 }}>כל התורים שלך במקום אחד</h1>
+              <div style={{ opacity: .86 }}>מצא עסקים, שמור מועדפים וקבע תור תוך דקה.</div>
+            </div>
+            <a href="/business" style={{ textDecoration: "none" }}>
+              <button style={{ ...S.btn, background: "rgba(255,255,255,.16)", color: "white" }}>כניסת עסקים</button>
+            </a>
+          </div>
+
+          <input
+            style={S.input}
+            placeholder="חפש עסק, שירות, עיר..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+        </header>
+
+        <section style={{ display: "flex", gap: 8, overflowX: "auto", padding: "18px 2px 8px" }}>
+          {CATEGORIES.map(c => (
+            <button
+              key={c}
+              style={{
+                ...S.chip,
+                background: category === c ? "#111827" : "white",
+                color: category === c ? "white" : "#111827",
+              }}
+              onClick={() => setCategory(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </section>
+
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, margin: "12px 0 22px" }}>
+          <MiniStat title="עסקים פעילים" value={visibleBusinesses.length} />
+          <MiniStat title="מועדפים" value={favorites.length} />
+          <MiniStat title="שירותים" value={services.filter(s => visibleBusinesses.some(b => b.id === s.business_id)).length} />
+        </section>
+
+        {loading ? (
+          <div style={{ ...S.card, padding: 22, color: "#6b7280", fontWeight: 900 }}>טוען עסקים...</div>
+        ) : visibleBusinesses.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            {favoriteBusinesses.length > 0 && (
+              <Carousel
+                title="❤️ המועדפים שלך"
+                businesses={favoriteBusinesses}
+                services={services}
+                favorites={favorites}
+                toggleFavorite={toggleFavorite}
+              />
+            )}
+
+            <Carousel
+              title="🔥 עסקים מומלצים"
+              businesses={popularBusinesses}
+              services={services}
+              favorites={favorites}
+              toggleFavorite={toggleFavorite}
+            />
+
+            <Carousel
+              title="✨ חדשים ב־DayBookMe"
+              businesses={newestBusinesses}
+              services={services}
+              favorites={favorites}
+              toggleFavorite={toggleFavorite}
+            />
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", marginTop: 22 }}>
+              <h2 style={{ margin: 0, fontSize: 22 }}>כל העסקים</h2>
+              <div style={{ color: "#6b7280", fontWeight: 800 }}>{visibleBusinesses.length} תוצאות</div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(250px,1fr))", gap: 14, marginTop: 12 }}>
+              {visibleBusinesses.map(b => (
+                <BusinessCard
+                  key={b.id}
+                  business={b}
+                  services={services.filter(s => s.business_id === b.id)}
+                  isFav={favorites.includes(b.id)}
+                  onFav={() => toggleFavorite(b.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
-    {toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: "#111827", color: "white", borderRadius: 999, padding: "12px 18px", fontWeight: 800 }}>{toast}</div>}
-  </div>;
+  );
 }
 
-function AuthScreen({ mode, setMode, login, setLogin, register, setRegister, doLogin, doRegister, loading }) {
-  return <div style={{ ...S.page, display: "grid", placeItems: "center", padding: 20 }}><div style={{ ...S.card, width: "100%", maxWidth: 430 }}>
-    <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 6 }}>DayBookMe לעסקים</div><div style={{ color: "#6b7280", marginBottom: 18 }}>כניסה מאובטחת לעסק עם סיסמה</div>
-    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button style={{ ...S.btn, flex: 1, ...(mode === "login" ? S.primary : S.ghost) }} onClick={() => setMode("login")}>כניסה</button><button style={{ ...S.btn, flex: 1, ...(mode === "register" ? S.primary : S.ghost) }} onClick={() => setMode("register")}>הרשמת עסק</button></div>
-    {mode === "login" ? <div style={{ display: "grid", gap: 12 }}><Field label="טלפון עסק" value={login.phone} onChange={v => setLogin({ ...login, phone: v })} /><Field label="סיסמה" type="password" value={login.password} onChange={v => setLogin({ ...login, password: v })} /><button style={{ ...S.btn, ...S.primary }} onClick={doLogin} disabled={loading}>{loading ? "בודק..." : "כניסה לעסק"}</button></div>
-      : <div style={{ display: "grid", gap: 12 }}><Field label="שם העסק" value={register.name} onChange={v => setRegister({ ...register, name: v })} /><Field label="שם בעלים" value={register.owner_name} onChange={v => setRegister({ ...register, owner_name: v })} /><Field label="טלפון" value={register.phone} onChange={v => setRegister({ ...register, phone: v })} /><Field label="סיסמה" type="password" value={register.password} onChange={v => setRegister({ ...register, password: v })} /><Field label="כתובת" value={register.address} onChange={v => setRegister({ ...register, address: v })} /><Field label="קישור לוגו / תמונה" value={register.logo_url} onChange={v => setRegister({ ...register, logo_url: v })} /><button style={{ ...S.btn, ...S.primary }} onClick={doRegister} disabled={loading}>{loading ? "פותח עסק..." : "פתח עסק"}</button></div>}
-  </div></div>;
+function MiniStat({ title, value }) {
+  return (
+    <div style={{ ...S.card, padding: 14 }}>
+      <div style={{ color: "#6b7280", fontSize: 12, fontWeight: 900 }}>{title}</div>
+      <div style={{ fontSize: 26, fontWeight: 950 }}>{value}</div>
+    </div>
+  );
 }
-function Field({ label, value, onChange, type = "text" }) { return <label><span style={S.label}>{label}</span><input style={S.input} type={type} value={value || ""} onChange={e => onChange(e.target.value)} /></label>; }
-function Dashboard({ stats, appointments, bookingUrl }) { const safeStats = obj(stats); const safeAppointments = arr(appointments); return <div style={{ display: "grid", gap: 16 }}><div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>{[["תורים פעילים", safeStats.upcoming || 0], ["היום", safeStats.today || 0], ["בוטלו", safeStats.cancelled || 0]].map(([l, v]) => <div key={l} style={S.card}><div style={{ color: "#6b7280", fontWeight: 800 }}>{l}</div><div style={{ fontSize: 34, fontWeight: 900 }}>{v}</div></div>)}</div><div style={S.card}><b>קישור הזמנה ללקוחות</b><div style={{ marginTop: 8, padding: 12, borderRadius: 10, background: "#f3f4f6", direction: "ltr", textAlign: "left", overflow: "auto" }}>{bookingUrl}</div></div><Appointments appointments={safeAppointments.slice(0, 5)} setApptStatus={() => {}} compact /></div>; }
-function Appointments({ appointments, setApptStatus, compact }) { return <div style={S.card}><h2 style={{ marginTop: 0 }}>תורים</h2><div style={{ display: "grid", gap: 10 }}>{arr(appointments).length === 0 ? <div style={{ color: "#6b7280" }}>אין תורים עדיין</div> : arr(appointments).map(a => <div key={a.id} style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}><div><b>{getClientName(a)}</b> · {getClientPhone(a)}<div style={{ color: "#6b7280", fontSize: 13 }}>{a?.service || ""} · {a?.date || ""} · {safeTime(a?.time)} · {a?.duration || ""} דק׳</div>{a?.notes && <div style={{ color: "#7c3aed", fontSize: 13 }}>הערה: {a.notes}</div>}</div><div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontWeight: 900, color: a?.status === "cancelled" ? "#dc2626" : a?.status === "confirmed" ? "#059669" : "#d97706" }}>{a?.status || "pending"}</span>{!compact && <><button style={{ ...S.btn, background: "#dcfce7", color: "#166534" }} onClick={() => setApptStatus(a.id, "confirmed")}>אשר</button><button style={{ ...S.btn, ...S.danger }} onClick={() => setApptStatus(a.id, "cancelled")}>בטל</button></>}</div></div>)}</div></div>; }
-function Settings({ business, updateBusiness }) { const [form, setForm] = useState(business || {}); useEffect(() => setForm(business || {}), [business?.id]); if (!form) return null; return <div style={S.card}><h2>הגדרות עסק</h2><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><Field label="שם עסק" value={form.name} onChange={v => setForm({ ...form, name: v })} /><Field label="טלפון" value={form.phone} onChange={v => setForm({ ...form, phone: v })} /><Field label="כתובת" value={form.address} onChange={v => setForm({ ...form, address: v })} /><Field label="קטגוריה" value={form.category} onChange={v => setForm({ ...form, category: v })} /><Field label="קישור לוגו" value={form.logo_url} onChange={v => setForm({ ...form, logo_url: v })} /><Field label="אינסטגרם" value={form.instagram} onChange={v => setForm({ ...form, instagram: v })} /></div><label style={{ display: "block", marginTop: 12 }}><span style={S.label}>אודות העסק</span><textarea style={{ ...S.input, minHeight: 90 }} value={form.about || ""} onChange={e => setForm({ ...form, about: e.target.value })} /></label><button style={{ ...S.btn, ...S.primary, marginTop: 12 }} onClick={() => updateBusiness(form)}>שמור הגדרות</button></div>; }
-function Employees({ employees, newEmployee, setNewEmployee, addEmployee, removeEmployee }) { return <div style={S.card}><h2>עובדים</h2><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8, marginBottom: 14 }}><input style={S.input} placeholder="שם" value={newEmployee.name} onChange={e => setNewEmployee({ ...newEmployee, name: e.target.value })} /><input style={S.input} placeholder="תפקיד" value={newEmployee.role} onChange={e => setNewEmployee({ ...newEmployee, role: e.target.value })} /><input style={S.input} placeholder="טלפון" value={newEmployee.phone} onChange={e => setNewEmployee({ ...newEmployee, phone: e.target.value })} /><button style={{ ...S.btn, ...S.primary }} onClick={addEmployee}>הוסף</button></div>{arr(employees).map(e => <div key={e.id} style={{ padding: 12, borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between" }}><span><b>{e.name}</b> · {e.role} · {e.phone}</span><button style={{ ...S.btn, ...S.danger }} onClick={() => removeEmployee(e.id)}>השבת</button></div>)}</div>; }
-function Services({ services, employees, newService, setNewService, addService, removeService }) { return <div style={S.card}><h2>שירותים ומחירים</h2><div style={{ display: "grid", gridTemplateColumns: "70px 1fr 100px 100px 160px auto", gap: 8, marginBottom: 14 }}><input style={S.input} value={newService.emoji} onChange={e => setNewService({ ...newService, emoji: e.target.value })} /><input style={S.input} placeholder="שם שירות" value={newService.name} onChange={e => setNewService({ ...newService, name: e.target.value })} /><input style={S.input} type="number" value={newService.duration} onChange={e => setNewService({ ...newService, duration: Number(e.target.value) })} /><input style={S.input} type="number" value={newService.price} onChange={e => setNewService({ ...newService, price: Number(e.target.value) })} /><select style={S.input} value={newService.employee_id} onChange={e => setNewService({ ...newService, employee_id: e.target.value })}><option value="">כל עובד</option>{arr(employees).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select><button style={{ ...S.btn, ...S.primary }} onClick={addService}>הוסף</button></div>{arr(services).map(s => <div key={s.id} style={{ padding: 12, borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between" }}><span>{s.emoji} <b>{s.name}</b> · {s.duration} דק׳ · ₪{s.price}</span><button style={{ ...S.btn, ...S.danger }} onClick={() => removeService(s.id)}>מחק</button></div>)}</div>; }
-function Availability({ availability, updateAvailability, breaks, addBreak, newBreak, setNewBreak, daysOff, addDayOff, newDayOff, setNewDayOff }) { const rows = arr(DAYS).map((d, i) => arr(availability).find(r => r?.day_of_week === i) || { day_of_week: i, is_open: i !== 6, start_time: "09:00", end_time: i === 5 ? "14:00" : "18:00", slot_minutes: 30 }); return <div style={{ display: "grid", gap: 16 }}><div style={S.card}><h2>זמינות שבועית</h2>{rows.map(r => <div key={r.day_of_week} style={{ display: "grid", gridTemplateColumns: "50px 100px 1fr 1fr 1fr auto", gap: 8, alignItems: "center", marginBottom: 8 }}><b>{DAYS[r.day_of_week]}</b><label><input type="checkbox" checked={!!r.is_open} onChange={e => updateAvailability({ ...r, is_open: e.target.checked })} /> פתוח</label><select style={S.input} value={safeTime(r.start_time)} onChange={e => updateAvailability({ ...r, start_time: e.target.value })}>{arr(TIMES).map(t => <option key={t}>{t}</option>)}</select><select style={S.input} value={safeTime(r.end_time)} onChange={e => updateAvailability({ ...r, end_time: e.target.value })}>{arr(TIMES).map(t => <option key={t}>{t}</option>)}</select><select style={S.input} value={r.slot_minutes || 30} onChange={e => updateAvailability({ ...r, slot_minutes: Number(e.target.value) })}><option value="15">15 דק׳</option><option value="30">30 דק׳</option><option value="60">60 דק׳</option></select><button style={{ ...S.btn, ...S.ghost }} onClick={() => updateAvailability(r)}>שמור</button></div>)}</div><div style={S.card}><h2>הפסקות קבועות</h2><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr auto", gap: 8 }}><select style={S.input} value={newBreak.day_of_week} onChange={e => setNewBreak({ ...newBreak, day_of_week: Number(e.target.value) })}>{arr(DAYS).map((d, i) => <option key={d} value={i}>{d}</option>)}</select><input style={S.input} value={newBreak.start_time} onChange={e => setNewBreak({ ...newBreak, start_time: e.target.value })} /><input style={S.input} value={newBreak.end_time} onChange={e => setNewBreak({ ...newBreak, end_time: e.target.value })} /><input style={S.input} value={newBreak.title} onChange={e => setNewBreak({ ...newBreak, title: e.target.value })} /><button style={{ ...S.btn, ...S.primary }} onClick={addBreak}>הוסף</button></div>{arr(breaks).map(b => <div key={b.id} style={{ padding: 8 }}>{DAYS[b.day_of_week]} · {safeTime(b.start_time)}-{safeTime(b.end_time)} · {b.title}</div>)}</div><div style={S.card}><h2>חופשות וימים סגורים</h2><div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 8 }}><input style={S.input} type="date" value={newDayOff.date} onChange={e => setNewDayOff({ ...newDayOff, date: e.target.value })} /><input style={S.input} placeholder="סיבה" value={newDayOff.reason} onChange={e => setNewDayOff({ ...newDayOff, reason: e.target.value })} /><button style={{ ...S.btn, ...S.primary }} onClick={addDayOff}>הוסף</button></div>{arr(daysOff).map(d => <div key={d.id} style={{ padding: 8 }}>{d.date} · {d.reason}</div>)}</div></div>; }
-function Billing({ subscription, startCheckout, loading }) { const active = isActiveSubscription(subscription); return <div style={S.card}><h2>מנוי ותשלום</h2><div style={{ padding: 12, borderRadius: 12, background: active ? "#dcfce7" : "#fee2e2", color: active ? "#166534" : "#991b1b", marginBottom: 16, fontWeight: 900 }}>{active ? `מנוי פעיל: ${subscription.plan_id}` : "אין מנוי פעיל — עמוד ההזמנות נעול"}</div><div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>{arr(PLANS).map(p => <div key={p.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16 }}><div style={{ fontWeight: 900, fontSize: 20 }}>{p.name}</div><div style={{ color: "#7c3aed", fontSize: 30, fontWeight: 900 }}>₪{p.price}</div><div style={{ color: "#6b7280" }}>לחודש</div><ul>{arr(p?.features).map(f => <li key={f}>{f}</li>)}</ul><button style={{ ...S.btn, ...S.primary, width: "100%" }} disabled={loading} onClick={() => startCheckout(p.id)}>בחר חבילה</button></div>)}</div></div>; }
+
+function EmptyState() {
+  return (
+    <div style={{ ...S.card, padding: 24, textAlign: "center" }}>
+      <div style={{ fontSize: 46 }}>🔎</div>
+      <h2 style={{ marginBottom: 6 }}>לא נמצאו עסקים</h2>
+      <div style={{ color: "#6b7280" }}>נסה לשנות חיפוש או קטגוריה. עסקים יופיעו כאן אחרי הפעלת מנוי.</div>
+      <a href="/business" style={{ textDecoration: "none" }}>
+        <button style={{ ...S.btn, ...S.primary, marginTop: 16 }}>אני בעל עסק</button>
+      </a>
+    </div>
+  );
+}
+
+function Carousel({ title, businesses, services, favorites, toggleFavorite }) {
+  if (!businesses.length) return null;
+
+  return (
+    <section style={{ marginTop: 20 }}>
+      <h2 style={{ margin: "0 0 12px", fontSize: 22 }}>{title}</h2>
+      <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
+        {businesses.map(b => (
+          <div key={b.id} style={{ minWidth: 280, maxWidth: 280 }}>
+            <BusinessCard
+              business={b}
+              services={services.filter(s => s.business_id === b.id)}
+              isFav={favorites.includes(b.id)}
+              onFav={() => toggleFavorite(b.id)}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BusinessCard({ business, services, isFav, onFav }) {
+  const firstServices = services.slice(0, 3);
+  const img = businessImage(business);
+
+  return (
+    <div style={S.card}>
+      <div style={{
+        height: 132,
+        background: img ? `url(${img}) center/cover` : "linear-gradient(135deg,#ede9fe,#dbeafe)",
+        position: "relative",
+      }}>
+        <button
+          onClick={onFav}
+          style={{
+            position: "absolute",
+            top: 10,
+            left: 10,
+            border: 0,
+            borderRadius: 999,
+            width: 42,
+            height: 42,
+            background: "rgba(255,255,255,.92)",
+            cursor: "pointer",
+            fontSize: 20,
+          }}
+        >
+          {isFav ? "❤️" : "🤍"}
+        </button>
+        <div style={{
+          position: "absolute",
+          right: 12,
+          bottom: 12,
+          width: 54,
+          height: 54,
+          borderRadius: 18,
+          background: "white",
+          display: "grid",
+          placeItems: "center",
+          fontSize: 28,
+          boxShadow: "0 8px 22px rgba(0,0,0,.14)",
+          overflow: "hidden",
+        }}>
+          {img ? <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "📅"}
+        </div>
+      </div>
+
+      <div style={{ padding: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 18 }}>{safeText(business.name, "עסק")}</h3>
+            <div style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>{safeText(business.category, "עסק מקומי")}</div>
+          </div>
+          <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 999, padding: "5px 8px", fontSize: 11, fontWeight: 900 }}>פתוח להזמנות</div>
+        </div>
+
+        <div style={{ color: "#6b7280", fontSize: 13, marginTop: 8, minHeight: 18 }}>
+          {business.address || "כתובת תוצג בקרוב"}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10, minHeight: 28 }}>
+          {firstServices.length === 0 ? (
+            <span style={{ color: "#9ca3af", fontSize: 12 }}>שירותים יתעדכנו בקרוב</span>
+          ) : firstServices.map(s => (
+            <span key={s.id} style={{ background: "#f3f4f6", borderRadius: 999, padding: "6px 8px", fontSize: 12, fontWeight: 800 }}>
+              {s.emoji || "✨"} {s.name}
+            </span>
+          ))}
+        </div>
+
+        <a href={`/book?business_id=${business.id}`} style={{ textDecoration: "none" }}>
+          <button style={{ ...S.btn, ...S.primary, width: "100%", marginTop: 14 }}>קבע תור</button>
+        </a>
+      </div>
+    </div>
+  );
+}
