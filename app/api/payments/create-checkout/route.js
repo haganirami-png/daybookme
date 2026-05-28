@@ -9,8 +9,12 @@ const PLANS = {
 
 function getAdminSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   if (!url || !key) return null;
+
   return createClient(url, key);
 }
 
@@ -20,19 +24,32 @@ export async function POST(req) {
     const plan = PLANS[planId];
 
     if (!businessId || !plan) {
-      return NextResponse.json({ error: "Missing businessId or invalid planId" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing businessId or invalid planId" },
+        { status: 400 }
+      );
     }
 
     const supabase = getAdminSupabase();
+
     if (!supabase) {
-      return NextResponse.json({ error: "Missing Supabase environment variables" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Missing Supabase environment variables" },
+        { status: 500 }
+      );
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
     const provider = process.env.PAYMENT_PROVIDER || "demo";
 
-    // Demo mode: creates a paid subscription immediately so the app can be tested end-to-end.
+    /*
+      DEMO MODE:
+      This activates the selected plan immediately without real payment.
+      Useful for MVP testing until a real payment provider is connected.
+    */
     if (provider === "demo") {
+      const now = new Date();
+      const nextMonth = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
       const { data, error } = await supabase
         .from("business_subscriptions")
         .insert({
@@ -44,40 +61,50 @@ export async function POST(req) {
           amount: plan.amount,
           currency: plan.currency,
           status: "active",
-          current_period_start: new Date().toISOString(),
-          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          current_period_start: now.toISOString(),
+          current_period_end: nextMonth.toISOString(),
+          updated_at: now.toISOString(),
         })
         .select()
         .single();
 
       if (error) {
-        console.error("DEMO PAYMENT ERROR:", error);
-        return NextResponse.json({ error: "Could not create demo subscription" }, { status: 500 });
+        console.error("DEMO SUBSCRIPTION ERROR:", error);
+        return NextResponse.json(
+          { error: error.message || "Could not activate demo subscription" },
+          { status: 500 }
+        );
       }
 
+      // Important: no checkoutUrl in demo mode.
+      // The frontend will stay on the dashboard and reload the subscription.
       return NextResponse.json({
         mode: "demo",
+        success: true,
         subscription: data,
-        checkoutUrl: `${appUrl}/?payment=success`,
       });
     }
 
-    // Generic provider mode: connect any payment company that can create checkout links.
-    // Required ENV:
-    // PAYMENT_PROVIDER_API_URL=https://provider.example.com/api/checkout
-    // PAYMENT_PROVIDER_SECRET=...
+    /*
+      REAL PAYMENT PROVIDER MODE:
+      Use this later when connecting a real checkout provider.
+    */
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
     const providerApiUrl = process.env.PAYMENT_PROVIDER_API_URL;
     const providerSecret = process.env.PAYMENT_PROVIDER_SECRET;
 
     if (!providerApiUrl || !providerSecret) {
-      return NextResponse.json({ error: "Missing payment provider env vars" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Missing payment provider env vars" },
+        { status: 500 }
+      );
     }
 
     const providerRes = await fetch(providerApiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${providerSecret}`,
+        Authorization: `Bearer ${providerSecret}`,
       },
       body: JSON.stringify({
         businessId,
@@ -93,14 +120,23 @@ export async function POST(req) {
     });
 
     const providerData = await providerRes.json().catch(() => ({}));
+
     if (!providerRes.ok) {
       console.error("PROVIDER CHECKOUT ERROR:", providerData);
-      return NextResponse.json({ error: "Payment provider error", details: providerData }, { status: 502 });
+      return NextResponse.json(
+        { error: "Payment provider error", details: providerData },
+        { status: 502 }
+      );
     }
 
-    const checkoutUrl = providerData.checkoutUrl || providerData.checkout_url || providerData.url;
+    const checkoutUrl =
+      providerData.checkoutUrl || providerData.checkout_url || providerData.url;
+
     if (!checkoutUrl) {
-      return NextResponse.json({ error: "Provider did not return checkout URL" }, { status: 502 });
+      return NextResponse.json(
+        { error: "Provider did not return checkout URL" },
+        { status: 502 }
+      );
     }
 
     await supabase.from("payment_events").insert({
