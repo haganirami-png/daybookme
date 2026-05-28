@@ -1,0 +1,1 @@
+export default function Profile(){return <div style={{padding:40,direction:"rtl",fontFamily:"Heebo"}}><h1>👤 פרופיל</h1><p>ניהול חשבון לקוח.</p></div>}

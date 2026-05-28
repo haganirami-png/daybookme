@@ -1,0 +1,1 @@
+export default function Favorites(){return <div style={{padding:40,direction:"rtl",fontFamily:"Heebo"}}><h1>❤️ מועדפים</h1><p>עדיין אין עסקים שמורים.</p></div>}

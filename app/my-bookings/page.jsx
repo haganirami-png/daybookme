@@ -1,0 +1,1 @@
+export default function MyBookings(){return <div style={{padding:40,direction:"rtl",fontFamily:"Heebo"}}><h1>📅 התורים שלי</h1><p>כאן יופיעו התורים של הלקוח.</p></div>}

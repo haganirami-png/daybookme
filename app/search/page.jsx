@@ -1,0 +1,1 @@
+export default function Search(){return <div style={{padding:40,direction:"rtl",fontFamily:"Heebo"}}><h1>🔍 חיפוש עסקים</h1><p>כאן יהיה חיפוש מתקדם לעסקים.</p></div>}

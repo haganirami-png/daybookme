@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "../lib/supabase";
 
 const CATEGORIES = [
@@ -339,7 +340,37 @@ function BusinessCard({ business, services, isFav, onFav }) {
   </div>;
 }
 
+
 function BottomNav() {
-  const item = (icon, label, active) => <button style={{ border: 0, background: active ? "#eef2ff" : "transparent", color: active ? "#4f46e5" : "#64748b", borderRadius: 16, padding: "9px 4px", fontFamily: "inherit", fontWeight: 950, cursor: "pointer" }}><div style={{ fontSize: 19 }}>{icon}</div><div style={{ fontSize: 11, marginTop: 2 }}>{label}</div></button>;
-  return <nav style={S.bottomNav}>{item("🏠", "בית", true)}{item("🔍", "חיפוש")}{item("❤️", "מועדפים")}{item("📅", "תורים")}{item("👤", "פרופיל")}</nav>;
+  const items = [
+    { icon: "🏠", label: "בית", href: "/", active: true },
+    { icon: "🔍", label: "חיפוש", href: "/search" },
+    { icon: "❤️", label: "מועדפים", href: "/favorites" },
+    { icon: "📅", label: "תורים", href: "/my-bookings" },
+    { icon: "👤", label: "פרופיל", href: "/profile" },
+  ];
+
+  return (
+    <nav style={S.bottomNav}>
+      {items.map((it) => (
+        <Link key={it.href} href={it.href} style={{ textDecoration: "none" }}>
+          <button style={{
+            width:"100%",
+            border:0,
+            background: it.active ? "#eef2ff" : "transparent",
+            color: it.active ? "#4f46e5" : "#64748b",
+            borderRadius:16,
+            padding:"9px 4px",
+            fontFamily:"inherit",
+            fontWeight:950,
+            cursor:"pointer"
+          }}>
+            <div style={{ fontSize: 19 }}>{it.icon}</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>{it.label}</div>
+          </button>
+        </Link>
+      ))}
+    </nav>
+  );
 }
+
