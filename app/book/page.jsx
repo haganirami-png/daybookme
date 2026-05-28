@@ -16,13 +16,12 @@ const S = {
   ghost: { background: "#f3f4f6", color: "#374151" },
   title: { fontSize: 17, fontWeight: 900, margin: "18px 0 12px" },
 };
+
 function fmtDate(d) { return d.toISOString().slice(0, 10); }
 function dateLabel(iso, i) { if (i === 0) return "היום"; if (i === 1) return "מחר"; const [, m, d] = iso.split("-"); return `${Number(d)}/${Number(m)}`; }
 function timeToMin(t) { const [h, m] = String(t || "00:00").slice(0,5).split(":").map(Number); return h * 60 + m; }
 function minToTime(m) { return `${String(Math.floor(m / 60)).padStart(2,"0")}:${String(m % 60).padStart(2,"0")}`; }
 function isSubActive(sub) { return sub && ["active", "trialing"].includes(sub.status) && (!sub.current_period_end || new Date(sub.current_period_end) > new Date()); }
-function normalizePhone(v) { return String(v || "").replace(/\D/g, ""); }
-function makeOtp() { return String(Math.floor(100000 + Math.random() * 900000)); }
 
 export default function BookPage() {
   const [mounted, setMounted] = useState(false);
@@ -42,10 +41,10 @@ export default function BookPage() {
   const [selectedTime, setSelectedTime] = useState(null);
   const [client, setClient] = useState({ name: "", phone: "", note: "" });
   const [otpSent, setOtpSent] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
   const [otpInput, setOtpInput] = useState("");
   const [otpVerified, setOtpVerified] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
   const [myAppts, setMyAppts] = useState([]);
   const [view, setView] = useState("book");
 
@@ -95,23 +94,53 @@ export default function BookPage() {
   }, [selectedDate, availability, breaks, daysOff, booked, selectedService]);
   const relevantEmployees = useMemo(() => selectedService?.employee_id ? employees.filter(e => e.id === selectedService.employee_id) : employees, [employees, selectedService]);
 
-  function sendOtp() {
-    const phone = normalizePhone(client.phone);
+  // ── TWILIO OTP ──
+  async function sendOtp() {
+    const phone = String(client.phone).replace(/\D/g, "");
     if (phone.length < 9) return alert("נא להזין מספר טלפון תקין");
-    const code = makeOtp();
-    setOtpCode(code);
-    setOtpInput("");
-    setOtpSent(true);
-    setOtpVerified(false);
-    // Demo OTP: in production this should be sent via SMS provider/API.
-    alert(`קוד האימות שלך הוא: ${code}`);
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: client.phone, action: "send" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setOtpSent(true);
+        setOtpInput("");
+        setOtpVerified(false);
+      } else {
+        alert("שגיאה בשליחת SMS: " + (data.error || "נסה שוב"));
+      }
+    } catch (e) {
+      alert("שגיאה בשליחת SMS");
+    } finally {
+      setOtpLoading(false);
+    }
   }
 
-  function verifyOtp() {
-    if (!otpSent || !otpCode) return alert("קודם צריך לשלוח קוד אימות");
-    if (String(otpInput).trim() !== otpCode) return alert("קוד האימות לא נכון");
-    setOtpVerified(true);
-    localStorage.setItem("clientPhone", client.phone);
+  async function verifyOtp() {
+    if (!otpInput || otpInput.length < 4) return alert("הכנס את הקוד שנשלח");
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: client.phone, action: "verify", code: otpInput }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setOtpVerified(true);
+        localStorage.setItem("clientPhone", client.phone);
+      } else {
+        alert("קוד האימות לא נכון, נסה שוב");
+      }
+    } catch (e) {
+      alert("שגיאה באימות");
+    } finally {
+      setOtpLoading(false);
+    }
   }
 
   async function confirmBooking() {
@@ -148,10 +177,38 @@ export default function BookPage() {
     {step === "service" && <><div style={S.title}>בחר שירות</div>{services.length === 0 ? <div style={S.card}>העסק עדיין לא הגדיר שירותים.</div> : services.map(s => <div key={s.id} style={{...S.card, borderColor: selectedService?.id === s.id ? "#7c3aed" : "#eee", cursor:"pointer"}} onClick={() => { setSelectedService(s); setSelectedEmployee(null); }}><div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}><div><b>{s.emoji} {s.name}</b><div style={{color:"#6b7280", fontSize:13}}>{s.duration} דקות</div></div><b style={{color:"#7c3aed"}}>₪{s.price}</b></div></div>)}<Sticky disabled={!selectedService} onClick={() => setStep("employee")}>המשך</Sticky></>}
     {step === "employee" && <><button style={{...S.btn,...S.ghost}} onClick={() => setStep("service")}>← חזור</button><div style={S.title}>בחר עובד</div>{relevantEmployees.length === 0 && <div style={S.card}>אין עובדים מוגדרים. אפשר להמשיך ללא בחירת עובד.</div>}{relevantEmployees.map(e => <div key={e.id} style={{...S.card, borderColor:selectedEmployee?.id===e.id?"#7c3aed":"#eee"}} onClick={() => setSelectedEmployee(e)}><b>{e.name}</b><div style={{color:"#6b7280"}}>{e.role}</div></div>)}<div style={{...S.card, borderStyle:"dashed"}} onClick={() => setSelectedEmployee({ id:null, name:"ללא העדפה" })}>אין לי העדפה</div><Sticky disabled={!selectedEmployee && relevantEmployees.length>0} onClick={() => setStep("date")}>המשך לתאריך</Sticky></>}
     {step === "date" && <><button style={{...S.btn,...S.ghost}} onClick={() => setStep("employee")}>← חזור</button><div style={S.title}>בחר תאריך</div><div style={{display:"flex", gap:8, overflowX:"auto", marginBottom:12}}>{dates.map(d => <button key={d.iso} style={{...S.btn, minWidth:68, ...(selectedDate===d.iso?S.primary:S.ghost)}} onClick={() => { setSelectedDate(d.iso); setSelectedTime(null); }}>{d.day}<br/>{d.label}</button>)}</div>{selectedDate && <><div style={S.title}>שעות פנויות</div><div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8}}>{availableTimes.map(t => <button key={t} style={{...S.btn, ...(selectedTime===t?S.primary:S.ghost)}} onClick={() => setSelectedTime(t)}>{t}</button>)}</div>{availableTimes.length===0 && <div style={S.card}>אין שעות פנויות ביום הזה</div>}</>}<Sticky disabled={!selectedDate || !selectedTime} onClick={() => setStep("details")}>המשך לפרטים</Sticky></>}
-    {step === "details" && <><button style={{...S.btn,...S.ghost}} onClick={() => setStep("date")}>← חזור</button><div style={S.title}>פרטים אישיים</div><div style={S.card}><input style={{...S.input, marginBottom:10}} placeholder="שם מלא" value={client.name} onChange={e => setClient({...client, name:e.target.value})} /><input style={{...S.input, marginBottom:10, direction:"ltr"}} placeholder="טלפון" value={client.phone} onChange={e => { setClient({...client, phone:e.target.value}); setOtpSent(false); setOtpVerified(false); setOtpCode(""); setOtpInput(""); }} /><textarea style={{...S.input, minHeight:70}} placeholder="הערה אופציונלית" value={client.note} onChange={e => setClient({...client, note:e.target.value})} />{!otpVerified ? <div style={{marginTop:10}}><button style={{...S.btn,...S.primary, width:"100%"}} onClick={sendOtp}>{otpSent ? "שלח קוד מחדש" : "שלח קוד אימות"}</button>{otpSent && <div style={{display:"grid", gap:8, marginTop:10}}><input style={{...S.input, direction:"ltr"}} placeholder="הכנס קוד אימות" value={otpInput} onChange={e => setOtpInput(e.target.value)} /><button style={{...S.btn,...S.ghost, width:"100%"}} onClick={verifyOtp}>אמת טלפון</button></div>}</div> : <div style={{color:"#059669", fontWeight:900, marginTop:10}}>✅ טלפון אומת</div>}</div><Sticky disabled={!client.name || !client.phone || !otpVerified} onClick={() => setStep("confirm")}>המשך לאישור</Sticky></>}
+    {step === "details" && <>
+      <button style={{...S.btn,...S.ghost}} onClick={() => setStep("date")}>← חזור</button>
+      <div style={S.title}>פרטים אישיים</div>
+      <div style={S.card}>
+        <input style={{...S.input, marginBottom:10}} placeholder="שם מלא" value={client.name} onChange={e => setClient({...client, name:e.target.value})} />
+        <input style={{...S.input, marginBottom:10, direction:"ltr"}} placeholder="טלפון" value={client.phone} onChange={e => { setClient({...client, phone:e.target.value}); setOtpSent(false); setOtpVerified(false); setOtpInput(""); }} />
+        <textarea style={{...S.input, minHeight:70}} placeholder="הערה אופציונלית" value={client.note} onChange={e => setClient({...client, note:e.target.value})} />
+        {!otpVerified ? (
+          <div style={{marginTop:10}}>
+            <button style={{...S.btn,...S.primary, width:"100%"}} onClick={sendOtp} disabled={otpLoading}>
+              {otpLoading ? "שולח..." : otpSent ? "שלח קוד מחדש" : "שלח קוד אימות SMS"}
+            </button>
+            {otpSent && (
+              <div style={{display:"grid", gap:8, marginTop:10}}>
+                <div style={{fontSize:13,color:"#6b7280",textAlign:"center"}}>📱 הכנס את הקוד שנשלח ל-{client.phone}</div>
+                <input style={{...S.input, direction:"ltr", textAlign:"center", fontSize:20, letterSpacing:8}} placeholder="000000" maxLength={6} value={otpInput} onChange={e => setOtpInput(e.target.value)} />
+                <button style={{...S.btn,...S.ghost, width:"100%"}} onClick={verifyOtp} disabled={otpLoading}>
+                  {otpLoading ? "מאמת..." : "✅ אמת טלפון"}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{color:"#059669", fontWeight:900, marginTop:10, textAlign:"center"}}>✅ טלפון אומת בהצלחה!</div>
+        )}
+      </div>
+      <Sticky disabled={!client.name || !client.phone || !otpVerified} onClick={() => setStep("confirm")}>המשך לאישור</Sticky>
+    </>}
     {step === "confirm" && <><button style={{...S.btn,...S.ghost}} onClick={() => setStep("details")}>← חזור</button><div style={S.title}>אישור התור</div><div style={S.card}><h3>{selectedService.emoji} {selectedService.name}</h3><p>{selectedDate} · {selectedTime}</p><p>{selectedEmployee?.name || "ללא העדפה"}</p><p>{client.name} · {client.phone}</p><b>₪{selectedService.price}</b></div><Sticky disabled={loading} onClick={confirmBooking}>{loading ? "שומר..." : "✅ אשר תור"}</Sticky></>}
-    {step === "success" && <div style={{ textAlign:"center", padding:"50px 20px" }}><div style={{fontSize:70}}>🎉</div><h2>התור נקבע ואושר אוטומטית!</h2><div style={S.card}>{selectedService.name}<br/>{selectedDate} · {selectedTime}</div><button style={{...S.btn,...S.primary, width:"100%"}} onClick={() => { loadMy(client.phone); setView("my"); }}>צפה בתורים שלי</button></div>}
+    {step === "success" && <div style={{ textAlign:"center", padding:"50px 20px" }}><div style={{fontSize:70}}>🎉</div><h2>התור נקבע ואושר!</h2><div style={S.card}>{selectedService.name}<br/>{selectedDate} · {selectedTime}</div><button style={{...S.btn,...S.primary, width:"100%"}} onClick={() => { loadMy(client.phone); setView("my"); }}>צפה בתורים שלי</button></div>}
   </Shell>;
 }
+
 function Shell({ business, title, children, right }) { return <div style={S.app}><div style={S.header}>{right && <div style={{float:"left"}}>{right}</div>}<div style={{fontSize: business?.logo_url ? 0 : 36, marginBottom:8}}>{business?.logo_url ? <img src={business.logo_url} style={{width:64,height:64,borderRadius:18,objectFit:"cover"}}/> : "📅"}</div><h1 style={{margin:0, fontSize:24}}>{title}</h1><div style={{opacity:.85, fontSize:13}}>{business?.address || ""}</div></div><main style={{padding:"16px 16px 100px"}}>{children}</main></div>; }
 function Sticky({ disabled, onClick, children }) { return <div style={{position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:460, background:"white", padding:"12px 16px 24px", borderTop:"1px solid #eee"}}><button disabled={disabled} onClick={onClick} style={{...S.btn, ...(disabled ? {background:"#e5e7eb", color:"#9ca3af"}:S.primary), width:"100%"}}>{children}</button></div>; }

@@ -24,7 +24,7 @@ export default function Profile() {
   const [mounted, setMounted] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
-  const [otpCode, setOtpCode] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -38,20 +38,53 @@ export default function Profile() {
     setAppts(data || []);
   }
 
-  function sendOtp() {
+  // ── TWILIO OTP ──
+  async function sendOtp() {
     if (phone.length < 9) return alert("נא להזין מספר טלפון תקין");
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setOtpCode(code);
-    setOtpSent(true);
-    alert(`קוד האימות שלך: ${code}`);
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, action: "send" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setOtpSent(true);
+        setOtp("");
+      } else {
+        alert("שגיאה בשליחת SMS: " + (data.error || "נסה שוב"));
+      }
+    } catch {
+      alert("שגיאה בשליחת SMS");
+    } finally {
+      setOtpLoading(false);
+    }
   }
 
-  function verifyOtp() {
-    if (otp.trim() !== otpCode) return alert("קוד לא נכון");
-    localStorage.setItem("clientPhone", phone);
-    setSavedPhone(phone);
-    setLoggedIn(true);
-    loadData(phone);
+  async function verifyOtp() {
+    if (!otp || otp.length < 4) return alert("הכנס את הקוד שנשלח");
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, action: "verify", code: otp }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        localStorage.setItem("clientPhone", phone);
+        setSavedPhone(phone);
+        setLoggedIn(true);
+        loadData(phone);
+      } else {
+        alert("קוד לא נכון, נסה שוב");
+      }
+    } catch {
+      alert("שגיאה באימות");
+    } finally {
+      setOtpLoading(false);
+    }
   }
 
   function logout() {
@@ -62,6 +95,8 @@ export default function Profile() {
     setSavedPhone("");
     setPhone("");
     setAppts([]);
+    setOtpSent(false);
+    setOtp("");
   }
 
   if (!mounted) return null;
@@ -78,9 +113,7 @@ export default function Profile() {
             <div style={{ fontSize: 18, fontWeight: 900 }}>{savedPhone}</div>
             <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>לקוח רשום</div>
           </div>
-
           <div style={{ padding: "16px 16px 80px" }}>
-            {/* STATS */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
               {[{ v: upcoming, l: "תורים קרובים" }, { v: done, l: "ביקורים" }, { v: favorites.length, l: "מועדפים" }].map((s, i) => (
                 <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 8px", textAlign: "center", border: "1px solid #ede9fe" }}>
@@ -89,8 +122,6 @@ export default function Profile() {
                 </div>
               ))}
             </div>
-
-            {/* QUICK ACTIONS */}
             <div style={S.card}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#1e1b4b", marginBottom: 12 }}>פעולות מהירות</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -99,8 +130,6 @@ export default function Profile() {
                 <button style={{ ...S.btn, ...S.ghost, textAlign: "right", width: "100%" }} onClick={() => router.push("/")}>🔍 חפש עסקים</button>
               </div>
             </div>
-
-            {/* RECENT APPTS */}
             {appts.length > 0 && (
               <div style={S.card}>
                 <div style={{ fontSize: 14, fontWeight: 800, color: "#1e1b4b", marginBottom: 12 }}>תורים אחרונים</div>
@@ -116,11 +145,7 @@ export default function Profile() {
                 <button style={{ ...S.btn, ...S.primary, width: "100%", marginTop: 10 }} onClick={() => router.push("/my-bookings")}>כל התורים</button>
               </div>
             )}
-
-            {/* LOGOUT */}
-            <button style={{ ...S.btn, background: "#fee2e2", color: "#dc2626", width: "100%" }} onClick={logout}>
-              🚪 התנתקות
-            </button>
+            <button style={{ ...S.btn, background: "#fee2e2", color: "#dc2626", width: "100%" }} onClick={logout}>🚪 התנתקות</button>
           </div>
         </>
       ) : (
@@ -130,26 +155,27 @@ export default function Profile() {
             <div style={{ fontSize: 20, fontWeight: 900 }}>הפרופיל שלי</div>
             <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>התחבר לצפייה בתורים ומועדפים</div>
           </div>
-
           <div style={{ padding: "24px 20px" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#1e1b4b", marginBottom: 6 }}>מספר טלפון</div>
             <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
               <input style={{ ...S.input, flex: 1 }} placeholder="050-0000000" value={phone} onChange={e => setPhone(e.target.value)} disabled={otpSent} />
-              <button style={{ ...S.btn, ...S.primary, flexShrink: 0 }} onClick={sendOtp} disabled={otpSent}>{otpSent ? "נשלח ✓" : "שלח קוד"}</button>
+              <button style={{ ...S.btn, ...S.primary, flexShrink: 0 }} onClick={sendOtp} disabled={otpSent || otpLoading}>
+                {otpLoading ? "..." : otpSent ? "נשלח ✓" : "שלח קוד"}
+              </button>
             </div>
             {otpSent && (
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: "#1e1b4b" }}>📱 הכנס את הקוד שנשלח</div>
-                <input style={{ ...S.input, textAlign: "center", fontSize: 22, letterSpacing: 8, marginBottom: 12 }} placeholder="______" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} />
-                <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={verifyOtp}>✅ כניסה</button>
+                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, textAlign: "center" }}>📱 הכנס את הקוד שנשלח ל-{phone}</div>
+                <input style={{ ...S.input, textAlign: "center", fontSize: 22, letterSpacing: 8, marginBottom: 12 }} placeholder="000000" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} />
+                <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={verifyOtp} disabled={otpLoading}>
+                  {otpLoading ? "מאמת..." : "✅ כניסה"}
+                </button>
               </div>
             )}
             <button style={{ ...S.btn, ...S.ghost, width: "100%", marginTop: 10 }} onClick={() => router.push("/")}>← חזור לדף הבית</button>
           </div>
         </>
       )}
-
-      {/* BOTTOM NAV */}
       <BottomNav active="profile" />
     </div>
   );

@@ -20,13 +20,12 @@ export default function MyBookings() {
   const [phone, setPhone] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
-  const [otpCode, setOtpCode] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
   const [appts, setAppts] = useState([]);
   const [section, setSection] = useState("upcoming");
-  const [loading, setLoading] = useState(false);
   const [cancelId, setCancelId] = useState(null);
   const [mounted, setMounted] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -39,19 +38,52 @@ export default function MyBookings() {
     setAppts(data || []);
   }
 
-  function sendOtp() {
+  // ── TWILIO OTP ──
+  async function sendOtp() {
     if (phone.length < 9) return alert("נא להזין מספר טלפון תקין");
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setOtpCode(code);
-    setOtpSent(true);
-    alert(`קוד האימות שלך: ${code}`);
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, action: "send" }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setOtpSent(true);
+        setOtp("");
+      } else {
+        alert("שגיאה בשליחת SMS: " + (data.error || "נסה שוב"));
+      }
+    } catch {
+      alert("שגיאה בשליחת SMS");
+    } finally {
+      setOtpLoading(false);
+    }
   }
 
-  function verifyOtp() {
-    if (otp.trim() !== otpCode) return alert("קוד לא נכון");
-    localStorage.setItem("clientPhone", phone);
-    setLoggedIn(true);
-    loadAppts(phone);
+  async function verifyOtp() {
+    if (!otp || otp.length < 4) return alert("הכנס את הקוד שנשלח");
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, action: "verify", code: otp }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        localStorage.setItem("clientPhone", phone);
+        setLoggedIn(true);
+        loadAppts(phone);
+      } else {
+        alert("קוד לא נכון, נסה שוב");
+      }
+    } catch {
+      alert("שגיאה באימות");
+    } finally {
+      setOtpLoading(false);
+    }
   }
 
   async function cancelAppt(id) {
@@ -61,7 +93,6 @@ export default function MyBookings() {
   }
 
   if (!mounted) return null;
-
   const filtered = appts.filter(a => a.status === section);
 
   return (
@@ -80,16 +111,20 @@ export default function MyBookings() {
       {!loggedIn ? (
         <div style={{ padding: "24px 20px" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#1e1b4b", marginBottom: 6 }}>הכנס מספר טלפון</div>
-          <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 20 }}>נשלח קוד אימות לצפייה בתורים שלך</div>
+          <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 20 }}>נשלח קוד SMS לאימות</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
             <input style={{ ...S.input, flex: 1 }} placeholder="050-0000000" value={phone} onChange={e => setPhone(e.target.value)} disabled={otpSent} />
-            <button style={{ ...S.btn, ...S.primary, flexShrink: 0 }} onClick={sendOtp} disabled={otpSent}>{otpSent ? "נשלח ✓" : "שלח קוד"}</button>
+            <button style={{ ...S.btn, ...S.primary, flexShrink: 0 }} onClick={sendOtp} disabled={otpSent || otpLoading}>
+              {otpLoading ? "..." : otpSent ? "נשלח ✓" : "שלח קוד"}
+            </button>
           </div>
           {otpSent && (
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#1e1b4b", marginBottom: 10 }}>📱 הכנס את הקוד שנשלח</div>
-              <input style={{ ...S.input, textAlign: "center", fontSize: 22, letterSpacing: 8, marginBottom: 12 }} placeholder="______" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} />
-              <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={verifyOtp}>✅ אמת וכנס</button>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, textAlign: "center" }}>📱 הכנס את הקוד שנשלח ל-{phone}</div>
+              <input style={{ ...S.input, textAlign: "center", fontSize: 22, letterSpacing: 8, marginBottom: 12 }} placeholder="000000" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} />
+              <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={verifyOtp} disabled={otpLoading}>
+                {otpLoading ? "מאמת..." : "✅ אמת וכנס"}
+              </button>
             </div>
           )}
           <button style={{ ...S.btn, ...S.ghost, width: "100%", marginTop: 10 }} onClick={() => router.push("/")}>← חזור לדף הבית</button>
@@ -101,7 +136,6 @@ export default function MyBookings() {
               <button key={t.id} style={S.tab(section === t.id)} onClick={() => setSection(t.id)}>{t.label}</button>
             ))}
           </div>
-
           <div style={{ padding: "16px 16px 80px" }}>
             {filtered.length === 0 ? (
               <div style={{ textAlign: "center", padding: "48px 0", color: "#9ca3af" }}>
@@ -125,9 +159,7 @@ export default function MyBookings() {
                 </div>
                 {a.notes && <div style={{ fontSize: 12, color: "#a78bfa", marginBottom: 8, fontStyle: "italic" }}>💬 {a.notes}</div>}
                 {section !== "cancelled" && (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button style={{ ...S.btn, background: "#fee2e2", color: "#dc2626", flex: 1 }} onClick={() => setCancelId(a.id)}>✕ בטל תור</button>
-                  </div>
+                  <button style={{ ...S.btn, background: "#fee2e2", color: "#dc2626", width: "100%" }} onClick={() => setCancelId(a.id)}>✕ בטל תור</button>
                 )}
                 {section === "cancelled" && (
                   <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={() => router.push("/")}>🔄 קבע מחדש</button>
