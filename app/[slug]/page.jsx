@@ -13,6 +13,30 @@ const S = {
 
 function ratingFor(id) { const n = String(id || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0); return (4.6 + (n % 4) / 10).toFixed(1); }
 function isSubActive(sub) { if (!sub) return false; if (!["active", "trialing"].includes(sub.status)) return false; if (!sub.current_period_end) return true; return new Date(sub.current_period_end).getTime() > Date.now(); }
+function getLogo(business) { return business.logo_url || business.image_url || ""; }
+function getCover(business) { return business.cover_url || business.banner_url || business.cover_image_url || business.logo_url || business.image_url || ""; }
+function getGallery(business) {
+  const raw = business.gallery_urls || business.photos || business.images || business.gallery || [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {}
+    return raw.split(",").map(x => x.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function mapsQuery(address) {
+  return encodeURIComponent(address || "");
+}
+function googleMapsUrl(address) {
+  return `https://www.google.com/maps/search/?api=1&query=${mapsQuery(address)}`;
+}
+function wazeUrl(address) {
+  return `https://waze.com/ul?q=${mapsQuery(address)}`;
+}
 
 export default function BusinessSlugPage() {
   const { slug } = useParams();
@@ -35,7 +59,24 @@ export default function BusinessSlugPage() {
 
   async function loadBusiness(s) {
     setLoading(true);
-    const { data: b } = await supabase.from("businesses").select("*").eq("slug", s).maybeSingle();
+    setNotFound(false);
+
+    let { data: b } = await supabase
+      .from("businesses")
+      .select("*")
+      .eq("slug", s)
+      .maybeSingle();
+
+    // Fallback: if the business has no slug, allow opening the profile by business id too.
+    if (!b) {
+      const byId = await supabase
+        .from("businesses")
+        .select("*")
+        .eq("id", s)
+        .maybeSingle();
+      b = byId.data;
+    }
+
     if (!b) { setNotFound(true); setLoading(false); return; }
     setBusiness(b);
 
@@ -81,6 +122,9 @@ export default function BusinessSlugPage() {
   const isFav = favorites.includes(business.id);
   const subActive = isSubActive(subscription);
   const minPrice = services.length ? Math.min(...services.map(s => Number(s.price || 0))) : null;
+  const logo = getLogo(business);
+  const cover = getCover(business);
+  const gallery = getGallery(business);
 
   const HOURS = [
     { day: "ראשון–חמישי", time: `${business.work_start || "09:00"}–${business.work_end || "18:00"}` },
@@ -91,32 +135,43 @@ export default function BusinessSlugPage() {
   return (
     <div style={S.app}>
       {/* COVER */}
-      <div style={{ background: `linear-gradient(160deg,${accent},#4f46e5)`, padding: "52px 20px 24px", color: "white", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", top: -20, left: -20, fontSize: 140, opacity: 0.07, lineHeight: 1, pointerEvents: "none" }}>{business.cover_emoji || "📅"}</div>
+      <div style={{ background: cover ? `linear-gradient(rgba(0,0,0,.25),rgba(0,0,0,.45)), url(${cover}) center/cover` : `linear-gradient(160deg,${accent},#4f46e5)`, padding: "52px 20px 24px", color: "white", position: "relative", overflow: "hidden" }}>
+        {!cover && <div style={{ position: "absolute", top: -20, left: -20, fontSize: 140, opacity: 0.07, lineHeight: 1, pointerEvents: "none" }}>{business.cover_emoji || "📅"}</div>}
         <div style={{ position: "relative", zIndex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-            <div>
-              <div style={{ fontSize: 32, marginBottom: 6 }}>{business.cover_emoji || "📅"}</div>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: -0.5 }}>{business.name}</div>
-              <div style={{ fontSize: 13, opacity: 0.85, marginTop: 3 }}>{business.category || "עסק מקומי"}</div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <div style={{ width: 64, height: 64, borderRadius: 20, background: logo ? `url(${logo}) center/cover` : "rgba(255,255,255,.18)", border: "2px solid rgba(255,255,255,.45)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 900, flexShrink: 0 }}>
+                {!logo && (business.cover_emoji || business.name?.[0] || "🏪")}
+              </div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: -0.5 }}>{business.name}</div>
+                <div style={{ fontSize: 13, opacity: 0.9, marginTop: 3 }}>{business.category || "עסק מקומי"}</div>
+              </div>
             </div>
             <button onClick={toggleFav} style={{ background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", borderRadius: 12, padding: "8px 12px", cursor: "pointer", fontSize: 20, color: "white" }}>
               {isFav ? "❤️" : "🤍"}
             </button>
           </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            <button style={{ ...S.btn, background: "white", color: accent, padding: "9px 12px" }} onClick={() => router.push(`/book?business_id=${business.id}`)}>📅 קביעת תור</button>
+            {business.phone && <button style={{ ...S.btn, background: "rgba(255,255,255,.18)", color: "white", padding: "9px 12px" }} onClick={() => window.location.href = `tel:${business.phone}`}>📞 יצירת קשר</button>}
+            {business.address && <button style={{ ...S.btn, background: "rgba(255,255,255,.18)", color: "white", padding: "9px 12px" }} onClick={() => window.open(wazeUrl(business.address), "_blank")}>📍 מיקום</button>}
+          </div>
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.2)", borderRadius: 20, padding: "5px 12px", fontSize: 13, fontWeight: 700 }}>
               ⭐ {ratingFor(business.id)}
             </div>
-            {business.address && <div style={{ fontSize: 12, opacity: 0.8, display: "flex", alignItems: "center", gap: 4 }}>📍 {business.address}</div>}
-            {business.phone && <div style={{ fontSize: 12, opacity: 0.8, display: "flex", alignItems: "center", gap: 4 }}>📞 {business.phone}</div>}
+            {business.address && <div style={{ fontSize: 12, opacity: 0.9, display: "flex", alignItems: "center", gap: 4 }}>📍 {business.address}</div>}
+            {business.phone && <div style={{ fontSize: 12, opacity: 0.9, display: "flex", alignItems: "center", gap: 4 }}>📞 {business.phone}</div>}
           </div>
         </div>
       </div>
 
       {/* TABS */}
       <div style={{ background: "white", display: "flex", borderBottom: "2px solid #f3f4f6", position: "sticky", top: 0, zIndex: 50 }}>
-        {[{ id: "book", label: "📅 הזמן תור" }, { id: "about", label: "ℹ️ אודות" }, { id: "team", label: "👥 צוות" }].map(t => (
+        {[{ id: "book", label: "📅 הזמן תור" }, { id: "about", label: "ℹ️ אודות" }, { id: "gallery", label: "🖼️ תמונות" }, { id: "team", label: "👥 צוות" }].map(t => (
           <button key={t.id} style={{ flex: 1, padding: "13px 4px", textAlign: "center", fontSize: 13, fontWeight: tab === t.id ? 800 : 600, color: tab === t.id ? accent : "#9ca3af", borderBottom: tab === t.id ? `2px solid ${accent}` : "2px solid transparent", marginBottom: -2, cursor: "pointer", background: "transparent", border: "none", fontFamily: "inherit" }} onClick={() => setTab(t.id)}>
             {t.label}
           </button>
@@ -190,9 +245,59 @@ export default function BusinessSlugPage() {
             ))}
           </div>
           {business.address && (
-            <button style={{ ...S.btn, background: "white", color: accent, border: `2px solid ${accent}`, width: "100%" }} onClick={() => window.open(`https://waze.com/ul?q=${encodeURIComponent(business.address)}`, "_blank")}>
-              🗺️ נווט לעסק
-            </button>
+            <div style={S.card}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#1e1b4b", marginBottom: 10 }}>מיקום העסק</div>
+              <button
+                style={{
+                  width: "100%",
+                  minHeight: 150,
+                  border: "1px solid #ede9fe",
+                  borderRadius: 16,
+                  background: `linear-gradient(135deg,rgba(124,58,237,.12),rgba(79,70,229,.12))`,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  padding: 16,
+                  textAlign: "center",
+                  marginBottom: 10
+                }}
+                onClick={() => window.open(googleMapsUrl(business.address), "_blank")}
+              >
+                <div style={{ fontSize: 38, marginBottom: 8 }}>📍</div>
+                <div style={{ fontSize: 14, fontWeight: 900, color: "#1e1b4b" }}>{business.address}</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>לחץ לפתיחה ב-Google Maps</div>
+              </button>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button
+                  style={{ ...S.btn, background: "white", color: accent, border: `2px solid ${accent}`, width: "100%" }}
+                  onClick={() => window.open(wazeUrl(business.address), "_blank")}
+                >
+                  🚗 Waze
+                </button>
+                <button
+                  style={{ ...S.btn, ...S.primary(accent), width: "100%" }}
+                  onClick={() => window.open(googleMapsUrl(business.address), "_blank")}
+                >
+                  🗺️ Google Maps
+                </button>
+              </div>
+            </div>
+          )}
+        </>}
+
+        {/* GALLERY TAB */}
+        {tab === "gallery" && <>
+          {gallery.length === 0 ? (
+            <div style={{ ...S.card, textAlign: "center", color: "#9ca3af" }}>
+              <div style={{ fontSize: 32 }}>🖼️</div>
+              <div style={{ marginTop: 8 }}>תמונות העסק יתעדכנו בקרוב</div>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {gallery.map((img, i) => (
+                <div key={i} style={{ height: 130, borderRadius: 16, background: `url(${img}) center/cover`, border: "1px solid #ede9fe" }} />
+              ))}
+            </div>
           )}
         </>}
 

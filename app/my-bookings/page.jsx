@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
@@ -15,6 +15,32 @@ const S = {
   tab: (a) => ({ flex: 1, padding: "12px 4px", textAlign: "center", fontSize: 13, fontWeight: a ? 800 : 600, color: a ? accent : "#9ca3af", borderBottom: a ? `2px solid ${accent}` : "2px solid transparent", cursor: "pointer", background: "transparent", border: "none", fontFamily: "inherit" }),
 };
 
+function getStatus(appt) {
+  if (appt?.status === "cancelled") return "cancelled";
+  const dt = new Date(`${appt?.date || ""}T${String(appt?.time || "00:00").slice(0, 5)}:00`);
+  if (!Number.isNaN(dt.getTime()) && dt.getTime() < Date.now()) return "completed";
+  return "confirmed";
+}
+
+function statusText(status) {
+  if (status === "cancelled") return "🔴 בוטל";
+  if (status === "completed") return "⚫ הסתיים";
+  return "🟢 תור מאושר";
+}
+
+function nextDates() {
+  return Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
+const EDIT_TIMES = Array.from({ length: 21 }, (_, i) => {
+  const mins = 8 * 60 + i * 30;
+  return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+});
+
 export default function MyBookings() {
   const router = useRouter();
   const [phone, setPhone] = useState("");
@@ -22,10 +48,15 @@ export default function MyBookings() {
   const [otp, setOtp] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
   const [appts, setAppts] = useState([]);
-  const [section, setSection] = useState("upcoming");
+  const [businesses, setBusinesses] = useState({});
+  const [section, setSection] = useState("confirmed");
   const [cancelId, setCancelId] = useState(null);
   const [mounted, setMounted] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
+  const [editAppt, setEditAppt] = useState(null);
+  const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -34,8 +65,26 @@ export default function MyBookings() {
   }, []);
 
   async function loadAppts(p) {
-    const { data } = await supabase.from("appointments").select("*").eq("client_phone", p || phone).order("created_at", { ascending: false });
-    setAppts(data || []);
+    const { data } = await supabase
+      .from("appointments")
+      .select("*")
+      .eq("client_phone", p || phone)
+      .order("created_at", { ascending: false });
+
+    const rows = data || [];
+    setAppts(rows);
+
+    const ids = [...new Set(rows.map(a => a.business_id).filter(Boolean))];
+    if (ids.length) {
+      const { data: biz } = await supabase
+        .from("businesses")
+        .select("id,name,phone,slug,address")
+        .in("id", ids);
+
+      const map = {};
+      (biz || []).forEach(b => { map[b.id] = b; });
+      setBusinesses(map);
+    }
   }
 
   // ── TWILIO OTP ──
@@ -69,7 +118,7 @@ export default function MyBookings() {
       const res = await fetch("/api/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, action: "verify", code: otp }),
+        body: JSON.stringify({ phone, action: "verify", code: String(otp).replace(/\s/g, "") }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -87,13 +136,40 @@ export default function MyBookings() {
   }
 
   async function cancelAppt(id) {
-    await supabase.from("appointments").update({ status: "cancelled" }).eq("id", id);
+    const { error } = await supabase.from("appointments").update({ status: "cancelled" }).eq("id", id);
+    if (error) return alert("שגיאה בביטול התור");
     setAppts(p => p.map(a => a.id === id ? { ...a, status: "cancelled" } : a));
     setCancelId(null);
   }
 
+  function openEdit(appt) {
+    setEditAppt(appt);
+    setEditDate(appt.date || nextDates()[0]);
+    setEditTime(String(appt.time || "09:00").slice(0, 5));
+  }
+
+  async function saveEdit() {
+    if (!editAppt || !editDate || !editTime) return alert("בחר תאריך ושעה");
+    setEditLoading(true);
+    try {
+      const { error } = await supabase
+        .from("appointments")
+        .update({ date: editDate, time: editTime, status: "confirmed" })
+        .eq("id", editAppt.id);
+
+      if (error) throw error;
+
+      setAppts(p => p.map(a => a.id === editAppt.id ? { ...a, date: editDate, time: editTime, status: "confirmed" } : a));
+      setEditAppt(null);
+    } catch (e) {
+      alert("שגיאה בשינוי התור");
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
   if (!mounted) return null;
-  const filtered = appts.filter(a => a.status === section);
+  const filtered = useMemo(() => appts.filter(a => getStatus(a) === section), [appts, section]);
 
   return (
     <div style={S.app}>
@@ -132,7 +208,7 @@ export default function MyBookings() {
       ) : (
         <>
           <div style={{ background: "white", display: "flex", borderBottom: "2px solid #f3f4f6" }}>
-            {[{ id: "upcoming", label: "⏳ קרובים" }, { id: "confirmed", label: "✅ מאושרים" }, { id: "cancelled", label: "❌ בוטלו" }].map(t => (
+            {[{ id: "confirmed", label: "✅ מאושרים" }, { id: "cancelled", label: "❌ בוטלו" }, { id: "completed", label: "⚫ הסתיימו" }].map(t => (
               <button key={t.id} style={S.tab(section === t.id)} onClick={() => setSection(t.id)}>{t.label}</button>
             ))}
           </div>
@@ -144,10 +220,14 @@ export default function MyBookings() {
                 <button style={{ ...S.btn, ...S.primary, marginTop: 16 }} onClick={() => router.push("/")}>＋ קבע תור עכשיו</button>
               </div>
             ) : filtered.map(a => (
-              <div key={a.id} style={{ ...S.card, borderRight: `4px solid ${section === "cancelled" ? "#ef4444" : section === "confirmed" ? "#10b981" : accent}` }}>
+              <div key={a.id} style={{ ...S.card, borderRight: `4px solid ${getStatus(a) === "cancelled" ? "#ef4444" : getStatus(a) === "completed" ? "#6b7280" : "#10b981"}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
                   <div style={{ fontSize: 15, fontWeight: 800, color: "#1e1b4b" }}>{a.service}</div>
                   <div style={{ fontSize: 14, fontWeight: 900, color: accent }}>₪{a.price || ""}</div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700 }}>🏪 {businesses[a.business_id]?.name || a.business || "עסק"}</div>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: getStatus(a) === "cancelled" ? "#dc2626" : getStatus(a) === "completed" ? "#6b7280" : "#059669" }}>{statusText(getStatus(a))}</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
                   {[{ l: "📅 תאריך", v: a.date }, { l: "⏰ שעה", v: String(a.time || "").slice(0, 5) }, { l: "⏱ משך", v: `${a.duration || ""}′` }].map((s, i) => (
@@ -158,16 +238,78 @@ export default function MyBookings() {
                   ))}
                 </div>
                 {a.notes && <div style={{ fontSize: 12, color: "#a78bfa", marginBottom: 8, fontStyle: "italic" }}>💬 {a.notes}</div>}
-                {section !== "cancelled" && (
-                  <button style={{ ...S.btn, background: "#fee2e2", color: "#dc2626", width: "100%" }} onClick={() => setCancelId(a.id)}>✕ בטל תור</button>
+                {getStatus(a) === "confirmed" && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <button style={{ ...S.btn, background: "#eef2ff", color: accent }} onClick={() => openEdit(a)}>🔄 שנה תור</button>
+                    <button style={{ ...S.btn, background: "#fee2e2", color: "#dc2626" }} onClick={() => setCancelId(a.id)}>✕ בטל תור</button>
+                    {businesses[a.business_id]?.phone && (
+                      <button style={{ ...S.btn, ...S.ghost, gridColumn: "1 / -1" }} onClick={() => window.location.href = `tel:${businesses[a.business_id].phone}`}>📞 צור קשר עם העסק</button>
+                    )}
+                  </div>
                 )}
-                {section === "cancelled" && (
-                  <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={() => router.push("/")}>🔄 קבע מחדש</button>
+                {getStatus(a) === "cancelled" && (
+                  <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={() => router.push(`/book?business_id=${a.business_id || ""}`)}>🔄 קבע מחדש</button>
+                )}
+                {getStatus(a) === "completed" && (
+                  <button style={{ ...S.btn, ...S.primary, width: "100%" }} onClick={() => router.push(`/book?business_id=${a.business_id || ""}`)}>＋ קבע שוב</button>
                 )}
               </div>
             ))}
-            <button style={{ ...S.btn, background: "white", color: accent, border: `2px solid ${accent}`, width: "100%", marginTop: 8 }} onClick={() => router.push("/")}>＋ הוסף תור נוסף</button>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button
+                style={{
+                  ...S.btn,
+                  background: "white",
+                  color: accent,
+                  border: `2px solid ${accent}`,
+                  flex: 1
+                }}
+                onClick={() => router.push("/")}
+              >
+                🏠 מסך הבית
+              </button>
+
+              <button
+                style={{
+                  ...S.btn,
+                  ...S.primary,
+                  flex: 1
+                }}
+                onClick={() => router.push("/")}
+              >
+                ＋ הוסף תור נוסף
+              </button>
+            </div>
           </div>
+
+          {editAppt && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "flex-end" }}>
+              <div style={{ background: "white", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 430, margin: "0 auto", padding: "24px 20px 36px" }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: "#e5e7eb", margin: "0 auto 18px" }} />
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#1e1b4b", textAlign: "center", marginBottom: 6 }}>שינוי תור</div>
+                <div style={{ fontSize: 14, color: "#6b7280", textAlign: "center", marginBottom: 18 }}>{editAppt.service}</div>
+
+                <div style={{ fontSize: 13, fontWeight: 900, color: "#374151", marginBottom: 8 }}>בחר תאריך חדש</div>
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 12 }}>
+                  {nextDates().map(d => (
+                    <button key={d} style={{ ...S.btn, flexShrink: 0, ...(editDate === d ? S.primary : S.ghost) }} onClick={() => setEditDate(d)}>{d.slice(5).replace("-", "/")}</button>
+                  ))}
+                </div>
+
+                <div style={{ fontSize: 13, fontWeight: 900, color: "#374151", marginBottom: 8 }}>בחר שעה חדשה</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, maxHeight: 210, overflowY: "auto", marginBottom: 18 }}>
+                  {EDIT_TIMES.map(t => (
+                    <button key={t} style={{ ...S.btn, ...(editTime === t ? S.primary : S.ghost) }} onClick={() => setEditTime(t)}>{t}</button>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button style={{ ...S.btn, ...S.ghost, flex: 1 }} onClick={() => setEditAppt(null)}>חזור</button>
+                  <button style={{ ...S.btn, ...S.primary, flex: 1 }} onClick={saveEdit} disabled={editLoading}>{editLoading ? "שומר..." : "✅ שמור שינוי"}</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {cancelId && (
             <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "flex-end" }}>

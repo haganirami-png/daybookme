@@ -48,6 +48,7 @@ function ratingFor(id) { const n = String(id || "").split("").reduce((a, c) => a
 function paletteFor(id) { const n = String(id || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0); return PALETTES[n % PALETTES.length]; }
 function serviceText(services) { return services.slice(0, 2).map(s => s?.name).filter(Boolean).join(" • ") || "שירותים יתעדכנו בקרוב"; }
 function isSubActive(sub) { if (!sub) return false; if (!["active", "trialing"].includes(sub.status)) return false; if (!sub.current_period_end) return true; return new Date(sub.current_period_end).getTime() > Date.now(); }
+function businessProfilePath(business) { return business?.slug ? `/${business.slug}` : `/book?business_id=${business.id}`; }
 
 export default function Home() {
   const router = useRouter();
@@ -174,7 +175,7 @@ export default function Home() {
               <section style={{ marginTop: 20 }}>
                 <div style={S.sectionHead}><h2 style={{ margin: 0 }}>❤️ המועדפים שלך</h2></div>
                 <div style={{ display: "flex", gap: 16, overflowX: "auto", padding: "2px 2px 12px" }}>
-                  {favBusinesses.map(b => <div key={b.id} style={{ minWidth: 300 }}><BusinessCard business={b} services={services.filter(s => s.business_id === b.id)} isFav={true} onFav={() => toggleFavorite(b.id)} onBook={() => router.push(`/book?business_id=${b.id}`)} /></div>)}
+                  {favBusinesses.map(b => <div key={b.id} style={{ minWidth: 300 }}><BusinessCard business={b} services={services.filter(s => s.business_id === b.id)} isFav={true} onFav={() => toggleFavorite(b.id)} onBook={() => router.push(`/book?business_id=${b.id}`)} onOpen={() => router.push(businessProfilePath(b))} /></div>)}
                 </div>
               </section>
             )}
@@ -183,7 +184,7 @@ export default function Home() {
               <div style={{ color: "#64748b", fontWeight: 900 }}>{visibleBusinesses.length} תוצאות</div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(265px,1fr))", gap: 16 }}>
-              {visibleBusinesses.map(b => <BusinessCard key={b.id} business={b} services={services.filter(s => s.business_id === b.id)} isFav={favorites.includes(b.id)} onFav={() => toggleFavorite(b.id)} onBook={() => router.push(`/book?business_id=${b.id}`)} />)}
+              {visibleBusinesses.map(b => <BusinessCard key={b.id} business={b} services={services.filter(s => s.business_id === b.id)} isFav={favorites.includes(b.id)} onFav={() => toggleFavorite(b.id)} onBook={() => router.push(`/book?business_id=${b.id}`)} onOpen={() => router.push(businessProfilePath(b))} />)}
             </div>
           </>
         )}
@@ -215,14 +216,17 @@ function MiniStat({ title, value, icon }) {
   </div>;
 }
 
-function BusinessCard({ business, services, isFav, onFav, onBook }) {
+function BusinessCard({ business, services, isFav, onFav, onBook, onOpen }) {
   const [a, b] = paletteFor(business.id);
   const img = business.logo_url || "";
   const minPrice = services.length ? Math.min(...services.map(s => Number(s.price || 0)).filter(n => n >= 0)) : null;
   return (
-    <div style={{ background: "rgba(255,255,255,.92)", border: "1px solid rgba(226,232,240,.9)", borderRadius: 26, overflow: "hidden", boxShadow: "0 18px 45px rgba(15,23,42,.08)" }}>
+    <div
+      onClick={onOpen}
+      style={{ background: "rgba(255,255,255,.92)", border: "1px solid rgba(226,232,240,.9)", borderRadius: 26, overflow: "hidden", boxShadow: "0 18px 45px rgba(15,23,42,.08)", cursor: "pointer" }}
+    >
       <div style={{ height: 154, background: img ? `linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.28)), url(${img}) center/cover` : `linear-gradient(135deg,${a},${b})`, position: "relative" }}>
-        <button onClick={onFav} style={{ position: "absolute", top: 12, left: 12, border: 0, borderRadius: 999, width: 44, height: 44, background: "rgba(255,255,255,.94)", cursor: "pointer", fontSize: 20 }}>{isFav ? "❤️" : "🤍"}</button>
+        <button onClick={(e) => { e.stopPropagation(); onFav(); }} style={{ position: "absolute", top: 12, left: 12, border: 0, borderRadius: 999, width: 44, height: 44, background: "rgba(255,255,255,.94)", cursor: "pointer", fontSize: 20 }}>{isFav ? "❤️" : "🤍"}</button>
         <div style={{ position: "absolute", bottom: 16, right: 14, width: 58, height: 58, borderRadius: 20, background: "white", display: "grid", placeItems: "center", fontSize: 30 }}>{img ? <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 20 }} /> : "📅"}</div>
         <div style={{ position: "absolute", bottom: 16, left: 14, background: "rgba(255,255,255,.92)", borderRadius: 999, padding: "7px 10px", fontWeight: 950, fontSize: 12 }}>⭐ {ratingFor(business.id)}</div>
       </div>
@@ -243,7 +247,7 @@ function BusinessCard({ business, services, isFav, onFav, onBook }) {
           <div style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>
             {minPrice !== null ? <>החל מ־<b style={{ color: "#111827", fontSize: 16 }}>₪{minPrice}</b></> : "מחיר יתעדכן"}
           </div>
-          <button style={{ border: 0, borderRadius: 16, padding: "13px 16px", fontWeight: 900, cursor: "pointer", fontFamily: "inherit", background: "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "white", flex: 1 }} onClick={onBook}>
+          <button style={{ border: 0, borderRadius: 16, padding: "13px 16px", fontWeight: 900, cursor: "pointer", fontFamily: "inherit", background: "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "white", flex: 1 }} onClick={(e) => { e.stopPropagation(); onBook(); }}>
             קבע תור
           </button>
         </div>
