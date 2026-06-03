@@ -1,7 +1,7 @@
 /* eslint-disable */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
@@ -67,7 +67,7 @@ const S = {
 
 const DAYS = getDatesAhead(14);
 
-export default function BookPage() {
+function BookPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const businessId = searchParams.get("business_id");
@@ -427,5 +427,13 @@ function ConfirmScreen({ business, service, employee, date, slot, clientName, on
         </button>
       </div>
     </div>
+  );
+}
+
+export default function BookPage() {
+  return (
+    <Suspense fallback={<CenteredMsg icon="📅" title="טוען..." />}>
+      <BookPageInner />
+    </Suspense>
   );
 }
